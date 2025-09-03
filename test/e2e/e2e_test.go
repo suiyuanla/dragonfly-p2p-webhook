@@ -291,8 +291,12 @@ var _ = Describe("Manager", Ordered, func() {
 			By("creating a test namespace with dragonfly injection label")
 			testNamespace := "test-dragonfly-injection"
 
+			By("ensuring test namespace is clean")
+			cmd := exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found=true", "--wait=true")
+			_, _ = utils.Run(cmd)
+
 			By("creating test namespace")
-			cmd := exec.Command("kubectl", "create", "ns", testNamespace)
+			cmd = exec.Command("kubectl", "create", "ns", testNamespace)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -444,6 +448,10 @@ var _ = Describe("Manager", Ordered, func() {
 			By("creating a test namespace with dragonfly injection")
 			testNamespace := "test-dragonfly-custom-config"
 
+			By("ensuring test namespace is clean")
+			cmd = exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found=true", "--wait=true")
+			_, _ = utils.Run(cmd)
+
 			By("creating test namespace")
 			cmd = exec.Command("kubectl", "create", "ns", testNamespace)
 			_, err = utils.Run(cmd)
@@ -546,8 +554,12 @@ type tokenRequest struct {
 
 // createTestNamespaceAndPod creates a test namespace and pod with the specified configuration
 func createTestNamespaceAndPod(namespace, podName, podOverrides string) {
+	By(fmt.Sprintf("ensuring test namespace %s is clean", namespace))
+	cmd := exec.Command("kubectl", "delete", "ns", namespace, "--ignore-not-found=true", "--wait=true")
+	_, _ = utils.Run(cmd)
+
 	By(fmt.Sprintf("creating test namespace %s", namespace))
-	cmd := exec.Command("kubectl", "create", "ns", namespace)
+	cmd = exec.Command("kubectl", "create", "ns", namespace)
 	_, err := utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred())
 
