@@ -295,16 +295,16 @@ var _ = Describe("Manager", Ordered, func() {
 			cmd := exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found=true", "--wait=true")
 			_, _ = utils.Run(cmd)
 
+			defer func() {
+				cmd = exec.Command("kubectl", "delete", "ns", testNamespace,
+					"--ignore-not-found=true", "--wait=true")
+				_, _ = utils.Run(cmd)
+			}()
+
 			By("creating test namespace")
 			cmd = exec.Command("kubectl", "create", "ns", testNamespace)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
-
-			defer func() {
-				cmd = exec.Command("kubectl", "delete", "ns", testNamespace,
-					"--ignore-not-found=true")
-				_, _ = utils.Run(cmd)
-			}()
 
 			By("labeling namespace for dragonfly injection")
 			cmd = exec.Command("kubectl", "label", "namespace", testNamespace,
@@ -331,6 +331,12 @@ var _ = Describe("Manager", Ordered, func() {
 			By("creating a test namespace and pod with dragonfly injection annotation")
 			testNamespace := "test-dragonfly-pod-annotation"
 
+			defer func() {
+				cmd := exec.Command("kubectl", "delete", "ns", testNamespace,
+					"--ignore-not-found=true", "--wait=true")
+				_, _ = utils.Run(cmd)
+			}()
+
 			podCfg := `{"metadata":{"annotations":{"dragonfly.io/inject":"enabled"}},` +
 				`"spec":{"containers":[{"name":"test","image":"nginx:latest"}]}}`
 			createTestNamespaceAndPod(testNamespace, "test-pod-annotated", podCfg)
@@ -349,6 +355,12 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should not inject dragonfly when injection is disabled", func() {
 			By("creating a test namespace and pod without injection annotations")
 			testNamespace := "test-dragonfly-no-injection"
+
+			defer func() {
+				cmd := exec.Command("kubectl", "delete", "ns", testNamespace,
+					"--ignore-not-found=true", "--wait=true")
+				_, _ = utils.Run(cmd)
+			}()
 
 			podCfg := `{"spec":{"containers":[{"name":"test","image":"nginx:latest"}]}}`
 			createTestNamespaceAndPod(testNamespace, "test-pod-no-inject", podCfg)
@@ -381,6 +393,12 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should exclude injection when explicitly disabled", func() {
 			By("creating a test namespace and pod with injection disabled annotation")
 			testNamespace := "test-dragonfly-exclude"
+
+			defer func() {
+				cmd := exec.Command("kubectl", "delete", "ns", testNamespace,
+					"--ignore-not-found=true", "--wait=true")
+				_, _ = utils.Run(cmd)
+			}()
 
 			podCfg := `{"metadata":{"annotations":{"dragonfly.io/inject":"disabled"}},` +
 				`"spec":{"containers":[{"name":"test","image":"nginx:latest"}]}}`
@@ -448,6 +466,11 @@ var _ = Describe("Manager", Ordered, func() {
 			By("creating a test namespace with dragonfly injection")
 			testNamespace := "test-dragonfly-custom-config"
 
+			defer func() {
+				cmd = exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found=true", "--wait=true")
+				_, _ = utils.Run(cmd)
+			}()
+
 			By("ensuring test namespace is clean")
 			cmd = exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found=true", "--wait=true")
 			_, _ = utils.Run(cmd)
@@ -456,11 +479,6 @@ var _ = Describe("Manager", Ordered, func() {
 			cmd = exec.Command("kubectl", "create", "ns", testNamespace)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
-
-			defer func() {
-				cmd = exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found=true")
-				_, _ = utils.Run(cmd)
-			}()
 
 			By("labeling namespace for dragonfly injection")
 			cmd = exec.Command("kubectl", "label", "namespace", testNamespace, "dragonfly.io/inject=enabled")
@@ -553,6 +571,7 @@ type tokenRequest struct {
 }
 
 // createTestNamespaceAndPod creates a test namespace and pod with the specified configuration
+// Note: Caller is responsible for cleanup
 func createTestNamespaceAndPod(namespace, podName, podOverrides string) {
 	By(fmt.Sprintf("ensuring test namespace %s is clean", namespace))
 	cmd := exec.Command("kubectl", "delete", "ns", namespace, "--ignore-not-found=true", "--wait=true")
@@ -563,11 +582,6 @@ func createTestNamespaceAndPod(namespace, podName, podOverrides string) {
 	_, err := utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred())
 
-	defer func() {
-		cmd = exec.Command("kubectl", "delete", "ns", namespace, "--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-	}()
-
 	By(fmt.Sprintf("creating test pod %s/%s", namespace, podName))
 	cmd = exec.Command("kubectl", "run", podName,
 		"--namespace", namespace,
@@ -575,9 +589,4 @@ func createTestNamespaceAndPod(namespace, podName, podOverrides string) {
 		"--overrides", podOverrides)
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred())
-
-	defer func() {
-		cmd = exec.Command("kubectl", "delete", "pod", podName, "-n", namespace, "--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-	}()
 }
