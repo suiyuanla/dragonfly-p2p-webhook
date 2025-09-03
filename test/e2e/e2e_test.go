@@ -268,6 +268,131 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifyCertManager).Should(Succeed())
 		})
 
+		It("should have webhook configuration ready", func() {
+			By("validating that the webhook service is available")
+			verifyWebhookService := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "service", "dragonfly-p2p-webhook-webhook-service", "-n", namespace)
+				_, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			Eventually(verifyWebhookService).Should(Succeed())
+
+			By("validating webhook service has endpoints")
+			verifyWebhookEndpoints := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "endpoints", "dragonfly-p2p-webhook-webhook-service", "-n", namespace)
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("443"))
+			}
+			Eventually(verifyWebhookEndpoints).Should(Succeed())
+		})
+
+		It("should inject dragonfly configuration via namespace label", func() {
+			By("creating a test namespace with dragonfly injection label")
+			testNamespace := "test-dragonfly-injection"
+
+			By("creating test namespace")
+			cmd := exec.Command("kubectl", "create", "ns", testNamespace)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			defer func() {
+				cmd = exec.Command("kubectl", "delete", "ns", testNamespace,
+					"--ignore-not-found=true")
+				_, _ = utils.Run(cmd)
+			}()
+
+			By("labeling namespace for dragonfly injection")
+			cmd = exec.Command("kubectl", "label", "namespace", testNamespace,
+				"dragonfly.io/inject=enabled")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating test pod in labeled namespace")
+			podCfg := `{"spec":{"containers":[{"name":"test","image":"nginx:latest"}]}}`
+			createTestNamespaceAndPod(testNamespace, "test-pod", podCfg)
+
+			By("waiting for the pod to be created and checking for dragonfly injection")
+			verifyInjection := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "test-pod", "-n", testNamespace,
+					"-o", "jsonpath={.spec.initContainers}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("dragonfly-cli-tools"))
+			}
+			Eventually(verifyInjection, 30*time.Second).Should(Succeed())
+		})
+
+		It("should inject dragonfly configuration via pod annotation", func() {
+			By("creating a test namespace and pod with dragonfly injection annotation")
+			testNamespace := "test-dragonfly-pod-annotation"
+
+			podCfg := `{"metadata":{"annotations":{"dragonfly.io/inject":"enabled"}},` +
+				`"spec":{"containers":[{"name":"test","image":"nginx:latest"}]}}`
+			createTestNamespaceAndPod(testNamespace, "test-pod-annotated", podCfg)
+
+			By("checking for dragonfly injection in the annotated pod")
+			verifyInjection := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "test-pod-annotated", "-n", testNamespace,
+					"-o", "jsonpath={.spec.volumes}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("dfdaemon-unix-socket"))
+			}
+			Eventually(verifyInjection, 30*time.Second).Should(Succeed())
+		})
+
+		It("should not inject dragonfly when injection is disabled", func() {
+			By("creating a test namespace and pod without injection annotations")
+			testNamespace := "test-dragonfly-no-injection"
+
+			podCfg := `{"spec":{"containers":[{"name":"test","image":"nginx:latest"}]}}`
+			createTestNamespaceAndPod(testNamespace, "test-pod-no-inject", podCfg)
+
+			By("verifying no dragonfly injection occurred")
+			verifyNoInjection := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "test-pod-no-inject", "-n", testNamespace,
+					"-o", "jsonpath={.spec.initContainers}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(ContainSubstring("dragonfly-cli-tools"))
+			}
+			Eventually(verifyNoInjection, 30*time.Second).Should(Succeed())
+		})
+
+		It("should have valid inject configuration configmap", func() {
+			By("validating the inject-config configmap exists and has valid data")
+			verifyConfigMap := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "configmap", "inject-config", "-n", namespace,
+					"-o", "jsonpath={.data.config-yaml}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("enable: true"))
+				g.Expect(output).To(ContainSubstring("proxy_port: 4001"))
+				g.Expect(output).To(ContainSubstring("cli_tools_image: dragonflyoss/cli-tools:latest"))
+			}
+			Eventually(verifyConfigMap).Should(Succeed())
+		})
+
+		It("should exclude injection when explicitly disabled", func() {
+			By("creating a test namespace and pod with injection disabled annotation")
+			testNamespace := "test-dragonfly-exclude"
+
+			podCfg := `{"metadata":{"annotations":{"dragonfly.io/inject":"disabled"}},` +
+				`"spec":{"containers":[{"name":"test","image":"nginx:latest"}]}}`
+			createTestNamespaceAndPod(testNamespace, "test-pod-exclude", podCfg)
+
+			By("verifying injection is excluded")
+			verifyNoInjection := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "test-pod-exclude", "-n", testNamespace,
+					"-o", "jsonpath={.spec.volumes}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(ContainSubstring("dfdaemon-unix-socket"))
+			}
+			Eventually(verifyNoInjection, 30*time.Second).Should(Succeed())
+		})
+
 		It("should have CA injection for mutating webhooks", func() {
 			By("checking CA injection for mutating webhooks")
 			verifyCAInjection := func(g Gomega) {
@@ -282,7 +407,72 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifyCAInjection).Should(Succeed())
 		})
 
-		// +kubebuilder:scaffold:e2e-webhooks-checks
+		It("should validate webhook metrics are comprehensive", func() {
+			By("collecting and validating webhook metrics")
+
+			metricsOutput := getMetricsOutput()
+
+			// Validate webhook-specific metrics
+			webhookMetrics := []string{
+				"controller_runtime_webhook_requests_total",
+				"controller_runtime_webhook_request_duration_seconds",
+				"controller_runtime_webhook_requests_in_flight",
+				"workqueue_depth",
+				"workqueue_adds_total",
+			}
+
+			for _, metric := range webhookMetrics {
+				Expect(metricsOutput).To(ContainSubstring(metric), fmt.Sprintf("Expected metric %s not found", metric))
+			}
+
+			By("ensuring metrics contain webhook-specific labels")
+			Expect(metricsOutput).To(ContainSubstring(`webhook="pod-defaulter"`))
+			Expect(metricsOutput).To(ContainSubstring(`webhook="pod-validator"`))
+		})
+
+		It("should handle custom CLI tools image configuration", func() {
+			By("updating the inject-config configmap with custom image")
+
+			customImage := "custom-registry/dragonfly-cli-tools:v1.0.0"
+			patchData := fmt.Sprintf(`{"data":{"config-yaml":`+
+				`"enable: true\nproxy_port: 4001\ncli_tools_image: %s\ncli_tools_dir_path: /dragonfly-tools"}}`, customImage)
+
+			cmd := exec.Command("kubectl", "patch", "configmap", "inject-config", "-n", namespace, "-p", patchData)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating a test namespace with dragonfly injection")
+			testNamespace := "test-dragonfly-custom-config"
+
+			By("creating test namespace")
+			cmd = exec.Command("kubectl", "create", "ns", testNamespace)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			defer func() {
+				cmd = exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found=true")
+				_, _ = utils.Run(cmd)
+			}()
+
+			By("labeling namespace for dragonfly injection")
+			cmd = exec.Command("kubectl", "label", "namespace", testNamespace, "dragonfly.io/inject=enabled")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating test pod in labeled namespace")
+			createTestNamespaceAndPod(testNamespace, "test-pod-custom",
+				`{"spec": {"containers": [{"name": "test", "image": "nginx:latest"}]}}`)
+
+			By("verifying the custom image is used in the injected init container")
+			verifyCustomImage := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "test-pod-custom", "-n", testNamespace,
+					"-o", "jsonpath={.spec.initContainers[?(@.name==\"dragonfly-cli-tools\")].image}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(customImage))
+			}
+			Eventually(verifyCustomImage, 60*time.Second).Should(Succeed())
+		})
 
 		// TODO: Customize the e2e test suite with scenarios specific to your project.
 		// Consider applying sample/CR(s) and check their status and/or verifying
@@ -352,4 +542,30 @@ type tokenRequest struct {
 	Status struct {
 		Token string `json:"token"`
 	} `json:"status"`
+}
+
+// createTestNamespaceAndPod creates a test namespace and pod with the specified configuration
+func createTestNamespaceAndPod(namespace, podName, podOverrides string) {
+	By(fmt.Sprintf("creating test namespace %s", namespace))
+	cmd := exec.Command("kubectl", "create", "ns", namespace)
+	_, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred())
+
+	defer func() {
+		cmd = exec.Command("kubectl", "delete", "ns", namespace, "--ignore-not-found=true")
+		_, _ = utils.Run(cmd)
+	}()
+
+	By(fmt.Sprintf("creating test pod %s/%s", namespace, podName))
+	cmd = exec.Command("kubectl", "run", podName,
+		"--namespace", namespace,
+		"--image=nginx:latest",
+		"--overrides", podOverrides)
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred())
+
+	defer func() {
+		cmd = exec.Command("kubectl", "delete", "pod", podName, "-n", namespace, "--ignore-not-found=true")
+		_, _ = utils.Run(cmd)
+	}()
 }
