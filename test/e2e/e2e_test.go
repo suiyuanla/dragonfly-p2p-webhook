@@ -30,6 +30,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"gopkg.in/yaml.v3"
 
 	"d7y.io/dragonfly-p2p-webhook/internal/webhook/v1/injector"
 	"d7y.io/dragonfly-p2p-webhook/test/utils"
@@ -453,7 +454,7 @@ spec:
 
 	// A temporary pod object for adding annotations
 	tempPod := &corev1.Pod{}
-	err := json.Unmarshal([]byte(podYAML), tempPod)
+	err := yaml.Unmarshal([]byte(podYAML), tempPod)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal base pod YAML: %w", err)
 	}
@@ -461,7 +462,7 @@ spec:
 		tempPod.Annotations = annotations
 	}
 	// Marshal it back to JSON (as kubectl apply -f - prefers json)
-	finalPodBytes, err := json.Marshal(tempPod)
+	finalPodBytes, err := yaml.Marshal(tempPod)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal final pod: %w", err)
 	}
